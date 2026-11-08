@@ -8,7 +8,8 @@
 
   function $(id) { return document.getElementById(id); }
   var toggle = $('toggle'), exitBtn = $('exit'), updateBtn = $('update'), refreshBtn = $('refresh'), logoutBtn = $('logout');
-  var buttons = [toggle, exitBtn, updateBtn, refreshBtn, logoutBtn];
+  var bootBtn = $('boot');
+  var buttons = [toggle, exitBtn, updateBtn, refreshBtn, bootBtn, logoutBtn];
   var armed = null;       // timer while Log out waits for its second press
   var logEl = $('log');
   var scroller = $('scroller');
@@ -113,6 +114,7 @@
     }
     var out = [];
     if (a.installed !== b.installed) out.push(b.installed ? 'tailscale installed' : 'tailscale build missing');
+    if (!!a.boot !== !!b.boot) out.push(b.boot ? 'start at boot on' : 'start at boot off');
     if (a.running !== b.running) out.push(b.running ? 'tailscaled started (pid ' + b.pid + ')' : 'tailscaled stopped');
     else if (a.pid && b.pid && a.pid !== b.pid) out.push('tailscaled restarted (pid ' + b.pid + ')');
     if (versionShort(a.version) !== versionShort(b.version) && b.version) out.push('version ' + versionShort(a.version) + ' → ' + versionShort(b.version));
@@ -188,6 +190,12 @@
     logoutBtn.disabled = busy || !signedIn;
     logoutBtn.textContent = armed ? 'Confirm' : 'Log out';
     logoutBtn.className = 'ctl' + (armed ? ' danger' : '');
+
+    // Start at boot: shows whether it's on; a press turns it the other way.
+    var boot = !!(info && info.boot);
+    bootBtn.textContent = 'Boot: ' + (boot ? 'on' : 'off');
+    bootBtn.className = 'ctl' + (boot ? ' on' : '');
+    bootBtn.disabled = busy || !info || !info.installed;
 
     // banners
     var html = '';
@@ -418,6 +426,8 @@
   }
 
   refreshBtn.addEventListener('click', function () { refresh(); statusText(); });
+
+  bootBtn.addEventListener('click', function () { run(info && info.boot ? 'boot off' : 'boot on'); });
 
   // Logging out signs the TV out of the tailnet; getting back needs Log in and a phone, so it
   // takes a second press within five seconds.

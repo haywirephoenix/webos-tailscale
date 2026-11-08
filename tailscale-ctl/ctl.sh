@@ -1,7 +1,7 @@
 #!/bin/sh
 # Root side of the Tailscale app. The app runs it through the Homebrew Channel's exec:
 #   sh ctl.sh status | status-text | up | down | exit-node [NAME]
-#             login | login-log | logout | latest | update | update-log
+#             login | login-log | logout | boot on|off | latest | update | update-log
 # Each command prints one JSON object on stdout.
 #
 # Layout on the TV:
@@ -15,6 +15,7 @@ STATE=/home/root/tailscaled.state
 LOG=/tmp/tailscalectl-update.log
 LOCK=/tmp/tailscalectl-update.lock
 LOGIN_LOG=/tmp/tailscalectl-login.log
+BOOT=/var/lib/webosbrew/init.d/70-tailscale   # the Homebrew Channel runs init.d at boot
 PKGS=https://pkgs.tailscale.com/stable
 SELF=$(cd "$(dirname "$0")" && pwd)/ctl.sh
 
@@ -90,8 +91,48 @@ cmd_status() {
   upd=false; [ -d "$LOCK" ] && upd=true
   inst=false; [ -x "$CUR/tailscaled" ] && inst=true
   login=false; [ -n "$(login_pid)" ] && login=true
-  printf '{"installed":%s,"running":%s,"pid":"%s","version":"%s","dir":"%s","updating":%s,"loggingIn":%s,"status":%s}\n' \
-    "$inst" "$([ -n "$pid" ] && echo true || echo false)" "$pid" "$(json_str "$ver")" "$(json_str "$dir")" "$upd" "$login" "$st"
+  boot=false; [ -x "$BOOT" ] && boot=true
+  printf '{"installed":%s,"running":%s,"pid":"%s","version":"%s","dir":"%s","updating":%s,"loggingIn":%s,"boot":%s,"status":%s}\n' \
+    "$inst" "$([ -n "$pid" ] && echo true || echo false)" "$pid" "$(json_str "$ver")" "$(json_str "$dir")" "$upd" "$login" "$boot" "$st"
+}
+
+# Start at boot. The script stands on its own, so it keeps working after an update (it uses
+# tailscale-current) and even if the app is removed; turning it off deletes it. At boot it starts
+# tailscaled unless one is running, then brings Tailscale up.
+cmd_boot() {
+  case "$1" in
+    on)
+      mkdir -p "$(dirname "$BOOT")"
+      cat >"$BOOT" <<'EOF'
+#!/bin/sh
+# Starts Tailscale at boot. Written by the Tailscale app (com.homebrew.tailscalectl): turn it off
+# there, or delete this file. The Homebrew Channel runs it from /var/lib/webosbrew/init.d.
+TS=/home/root/sbin/tailscale-current
+(
+  sleep 10
+  [ -x "$TS/tailscaled" ] || exit 0
+  if [ -z "$(pidof tailscaled)" ]; then
+    setsid "$TS/tailscaled" --state=/home/root/tailscaled.state </dev/null >/dev/null 2>&1 &
+  fi
+  i=0
+  while [ $i -lt 30 ]; do
+    "$TS/tailscale" status --json 2>/dev/null | grep -q '"BackendState"' && break
+    sleep 1; i=$((i + 1))
+  done
+  # A bare "up": the settings this TV needs are already saved in the state file.
+  if timeout -t 1 true 2>/dev/null; then timeout -t 60 "$TS/tailscale" up; else timeout 60 "$TS/tailscale" up; fi
+) </dev/null >/dev/null 2>&1 &
+exit 0
+EOF
+      chmod 755 "$BOOT"
+      if [ -x "$BOOT" ] && sh -n "$BOOT"; then result 0 "boot on" "Tailscale starts at boot ($BOOT)."
+      else result 1 "boot on" "Could not write $BOOT."; fi ;;
+    off)
+      rm -f "$BOOT"
+      if [ -e "$BOOT" ]; then result 1 "boot off" "Could not remove $BOOT."
+      else result 0 "boot off" "Tailscale no longer starts at boot."; fi ;;
+    *) result 1 "boot $1" "usage: ctl.sh boot on|off" ;;
+  esac
 }
 
 # What "tailscale version" and "tailscale status" print, for the console.
@@ -263,9 +304,10 @@ case "$1" in
   login) cmd_login ;;
   login-log) cmd_login_log ;;
   logout) cmd_logout ;;
+  boot) cmd_boot "$2" ;;
   latest) cmd_latest ;;
   update) cmd_update ;;
   do-update) do_update ;;
   update-log) cmd_update_log ;;
-  *) echo '{"error":"usage: ctl.sh status|status-text|up|down|exit-node [NAME]|login|login-log|logout|latest|update|update-log"}' ;;
+  *) echo '{"error":"usage: ctl.sh status|status-text|up|down|exit-node [NAME]|login|login-log|logout|boot on|off|latest|update|update-log"}' ;;
 esac

@@ -99,6 +99,7 @@ body {
 .ctl.primary.is-up { border-color: var(--red-dim); color: var(--red); background: rgba(240,85,90,0.08); }
 .ctl.attention { border-color: var(--amber-dim); color: var(--amber); }
 .ctl.danger { border-color: var(--red-dim); color: var(--red); background: rgba(240,85,90,0.08); }
+.ctl.on { border-color: var(--green-dim); color: var(--green); }
 .ctl:disabled { opacity: 0.4; }
 .ctl:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(90,169,230,0.45); }
 

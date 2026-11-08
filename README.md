@@ -53,6 +53,7 @@ wheel, scroll the device list. The wheel scrolls the console when the pointer is
 | Exit node | Cycles through *none* and each device that offers itself as an exit node (`tailscale set --exit-node`). |
 | Check for update / Update to … | Looks up the latest stable version, then on a second press downloads it, checks it and switches to it. If the new `tailscaled` won't start, it goes back to the old build. The build in use and the one before it are kept. |
 | Refresh | Reads the status now and prints `tailscale version` and `tailscale status` to the console. |
+| Boot: on / off | Start at boot. When it's on, Tailscale starts and connects each time the TV starts; a press turns it the other way. See [Start at boot](#start-at-boot). |
 | Log out | `tailscale logout`. Needs a second press within five seconds, then clears the console. |
 
 The **devices** list shows this TV first, then the other devices on the tailnet: address, OS, when
@@ -71,10 +72,21 @@ starting, stopping or changing version.
 | `/home/root/sbin/tailscale_<version>_arm/` | Official static builds (`tailscale`, `tailscaled`). |
 | `/home/root/sbin/tailscale-current` | Symlink to the build in use. Scripts and key bindings should use this path, so they keep working after an update. |
 | `/home/root/tailscaled.state` | The TV's Tailscale identity and settings. |
+| `/var/lib/webosbrew/init.d/70-tailscale` | The start-at-boot script, there only while **Boot** is on. |
 | `/tmp/tailscalectl-update.log`, `/tmp/tailscalectl-login.log` | Output of the last update and login. |
 
-`tailscaled` runs as `tailscaled --state=/home/root/tailscaled.state`. It isn't started at boot; the
-app, or a script of your own, starts it when it's needed. Only one `tailscaled` can run at a time.
+`tailscaled` runs as `tailscaled --state=/home/root/tailscaled.state`. Only one `tailscaled` can run
+at a time.
+
+### Start at boot
+
+By default Tailscale isn't started at boot: the app, or a script of your own, starts it when it's
+needed. Turn **Boot** on and the app writes `/var/lib/webosbrew/init.d/70-tailscale`, which the
+Homebrew Channel runs each time the TV starts. About ten seconds after boot, it starts `tailscaled`
+(unless one is already running) and runs `tailscale up`. Turning **Boot** off deletes the script.
+
+The script uses `tailscale-current`, so it keeps working after an update, and it stands on its own,
+so it keeps working even if the app is removed. Delete the file to stop it by hand.
 
 ### Settings this TV needs
 
@@ -117,12 +129,13 @@ The app is a plain web app and can't run commands itself, so it asks the Homebre
 
 | Command | |
 | --- | --- |
-| `status` | Whether Tailscale is installed and running, its version, and `tailscale status --json`. |
+| `status` | Whether Tailscale is installed and running, its version, whether it starts at boot, and `tailscale status --json`. |
 | `status-text` | `tailscale version` and `tailscale status`, for the console. |
 | `up`, `down` | `tailscale up` (bare, with a 30-second limit) or `tailscale down`. |
 | `exit-node [IP]` | `tailscale set --exit-node=IP`; no IP clears it. |
 | `login`, `login-log` | Starts `tailscale up --qr --reset` in the background, and reads what it printed (the link and the QR code as text, which the app draws). |
 | `logout` | `tailscale logout`. |
+| `boot on`, `boot off` | Writes or deletes the start-at-boot script. `status` reports whether it's on. |
 | `latest` | The latest stable version from `pkgs.tailscale.com`. |
 | `update`, `update-log` | Installs or updates in the background, and reads its progress. |
 
@@ -153,6 +166,8 @@ works. Choose where it starts with `?state=`:
 | `fresh` | Tailscale not installed. **Install Tailscale** runs a pretend install. |
 | `nodaemon` | Installed, `tailscaled` not running. |
 | `updating` | An update in progress. |
+
+Add `&boot=on` to start with **Boot** turned on.
 
 On the TV, start demo mode with launch parameters:
 
