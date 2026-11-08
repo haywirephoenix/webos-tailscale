@@ -1,0 +1,14 @@
+{
+  "id": "com.homebrew.tailscalectl",
+  "version": "1.2.3",
+  "vendor": "haywire",
+  "type": "web",
+  "main": "index.html",
+  "title": "Tailscale",
+  "icon": "icon.png",
+  "iconColor": "#e8e6e7",
+  "largeIcon": "largeIcon.png",
+  "uiRevision": 2,
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true
+}

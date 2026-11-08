@@ -1,0 +1,8 @@
+dist/
+.claude/
+# Older files kept on this PC, not part of the app
+install.sh
+tailscale.sh
+tailscale-ctl.zip
+tailscale-ctl.bak-*/
+tv-scripts/

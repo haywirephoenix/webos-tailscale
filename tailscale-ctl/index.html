@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tailscale</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="topline">
+      <div class="brand">
+        <div class="headleft">
+          <h1>tailnet status <span id="tailnet">/ &hellip;</span></h1>
+          <div class="meta-line" id="meta">reading status</div>
+        </div>
+      </div>
+
+       <div class="controls" id="controls">
+          <button class="ctl primary" id="toggle" disabled>&hellip;</button>
+          <button class="ctl" id="exit" disabled>Exit node: none</button>
+          <button class="ctl" id="update">Check for update</button>
+          <button class="ctl" id="refresh">Refresh</button>
+          <button class="ctl" id="logout" disabled>Log out</button>
+          <span class="demo-tag" id="demoTag" hidden>demo</span>
+        </div>
+        
+      <div class="state-pill unknown" id="pill"><span class="dot"></span><span id="pillText">checking</span></div>
+    </div>
+
+    
+
+    <div class="main">
+      <div class="pane-left" id="scroller">
+        <div id="banners"></div>
+        <div id="peers"></div>
+      </div>
+      <div class="pane-right">
+        <div class="section-label">Console</div>
+        <pre class="console" id="log"></pre>
+      </div>
+    </div>
+
+    <footer>build <code id="build">&mdash;</code> &middot; state <code>/home/root/tailscaled.state</code> &middot; refreshes every 5s</footer>
+  </div>
+  <script src="demo.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
