@@ -176,6 +176,7 @@
       return { started: true };
     }
     if (op === 'update-log') return { updating: state.updating, log: state.log.join('\n') };
+    if (op === 'info') return { system: { modelName: 'OLED55BX6LB', firmwareVersion: '04.41.35', sdkVersion: '5.4.3' }, webos: '5.4.3', version: '1.3.0' };
     return { error: 'unknown command ' + cmd };
   }
 

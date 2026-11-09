@@ -1,7 +1,7 @@
 #!/bin/sh
 # Root side of the Tailscale app. The app runs it through the Homebrew Channel's exec:
 #   sh ctl.sh status | status-text | up | down | exit-node [NAME]
-#             login | login-log | logout | boot on|off | latest | update | update-log
+#             login | login-log | logout | boot on|off | latest | update | update-log | info
 # Each command prints one JSON object on stdout.
 #
 # Layout on the TV:
@@ -295,6 +295,15 @@ cmd_update_log() {
   printf '{"updating":%s,"log":"%s"}\n' "$upd" "$(json_str "$(tail -n 40 "$LOG" 2>/dev/null)")"
 }
 
+# The TV's model, webOS and firmware versions and this app's version, for a compatibility report.
+cmd_info() {
+  sys=$(luna-send -n 1 luna://com.webos.service.tv.systemproperty/getSystemInfo '{"keys":["modelName","firmwareVersion","sdkVersion"]}' 2>/dev/null | tail -n 1)
+  case "$sys" in "{"*) ;; *) sys='{}' ;; esac
+  release=$(nyx-cmd OSInfo query webos_release 2>/dev/null | tr -cd '0-9.')
+  version=$(sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$(dirname "$SELF")/appinfo.json")
+  printf '{"system":%s,"webos":"%s","version":"%s"}\n' "$sys" "$release" "$version"
+}
+
 case "$1" in
   status) cmd_status ;;
   status-text) cmd_status_text ;;
@@ -309,5 +318,6 @@ case "$1" in
   update) cmd_update ;;
   do-update) do_update ;;
   update-log) cmd_update_log ;;
+  info) cmd_info ;;
   *) echo '{"error":"usage: ctl.sh status|status-text|up|down|exit-node [NAME]|login|login-log|logout|boot on|off|latest|update|update-log"}' ;;
 esac

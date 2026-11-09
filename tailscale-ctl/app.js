@@ -9,7 +9,8 @@
   function $(id) { return document.getElementById(id); }
   var toggle = $('toggle'), exitBtn = $('exit'), updateBtn = $('update'), refreshBtn = $('refresh'), logoutBtn = $('logout');
   var bootBtn = $('boot');
-  var buttons = [toggle, exitBtn, updateBtn, refreshBtn, bootBtn, logoutBtn];
+  var reportBtn = $('report');
+  var buttons = [toggle, exitBtn, updateBtn, refreshBtn, bootBtn, logoutBtn, reportBtn];
   var armed = null;       // timer while Log out waits for its second press
   var logEl = $('log');
   var scroller = $('scroller');
@@ -427,6 +428,11 @@
 
   refreshBtn.addEventListener('click', function () { refresh(); statusText(); });
 
+  reportBtn.addEventListener('click', function () {
+    window.Compat.open(ctl, function () { (reportBtn.disabled ? toggle : reportBtn).focus(); });
+  });
+  window.Compat.init(ctl);
+
   bootBtn.addEventListener('click', function () { run(info && info.boot ? 'boot off' : 'boot on'); });
 
   // Logging out signs the TV out of the tailnet; getting back needs Log in and a phone, so it
@@ -449,6 +455,17 @@
   function focusable() { return buttons.filter(function (b) { return !b.disabled; }); }
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
+    // The compatibility form: Back closes it, and every arrow steps through its buttons.
+    if (window.Compat.isOpen()) {
+      if (k === 461 || k === 27) { window.Compat.close(); e.preventDefault(); return; }
+      var form = window.Compat.buttons(), at = form.indexOf(document.activeElement);
+      if (k >= 37 && k <= 40 && form.length) {
+        var step = k === 39 || k === 40 ? 1 : -1;
+        form[at < 0 ? 0 : Math.max(0, Math.min(form.length - 1, at + step))].focus();
+        e.preventDefault();
+      }
+      return;
+    }
     if (k === 461 || k === 27) { window.close(); return; }
     var list = focusable(), i = list.indexOf(document.activeElement);
     if (k === 37 || k === 39) {

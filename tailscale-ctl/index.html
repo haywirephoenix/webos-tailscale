@@ -38,12 +38,31 @@
       <div class="pane-right">
         <div class="section-label">Console</div>
         <pre class="console" id="log"></pre>
+        <div class="compat-box">
+          <div class="section-label">Compatibility <span class="count" id="reportCount"></span></div>
+          <button class="ctl" id="report">Send a report</button>
+          <p class="note" id="reportNote">Looking for testers! Help support this app by sending an anonymous compatibility report.</p>
+        </div>
       </div>
     </div>
 
     <footer>build <code id="build">&mdash;</code> &middot; state <code>/home/root/tailscaled.state</code> &middot; refreshes every 5s</footer>
   </div>
+  <div id="compat" role="dialog" aria-labelledby="compatTitle">
+    <div class="sheet">
+      <div class="section-label" id="compatTitle">Compatibility report</div>
+      <p class="lead">Tick each one that is true on this TV. Leave it unticked if it isn't, or you haven't tried it.</p>
+      <div id="questions"></div>
+      <p class="note" id="aboutTv"></p>
+      <p class="note" id="sendNote"></p>
+      <div class="sheet-buttons">
+        <button class="ctl" id="cancelReport">Cancel</button>
+        <button class="ctl primary" id="send" disabled>Send</button>
+      </div>
+    </div>
+  </div>
   <script src="demo.js"></script>
+  <script src="compat.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

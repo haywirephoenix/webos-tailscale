@@ -190,6 +190,35 @@ body {
 .console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .console::-webkit-scrollbar-track { background: transparent; }
 
+/* ---------- Compatibility: a box under the console, and its form over the page ---------- */
+.compat-box {
+  flex: none; margin-top: 12px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+}
+.compat-box .section-label { margin-bottom: 10px; }
+.compat-box .ctl { width: 100%; text-align: left; }
+.note { margin-top: 8px; font-size: 11px; line-height: 1.5; color: var(--text-faint); }
+.note.go { color: var(--green); }
+.note.error { color: var(--red); }
+.note:empty { display: none; }
+#compat {
+  position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: 5;
+  display: none; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.8);
+}
+#compat .sheet {
+  width: 640px; padding: 20px 24px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 0 0 1px var(--border-soft), 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+#compat .lead { margin-bottom: 12px; font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+#questions .check { display: flex; align-items: center; width: 100%; margin-bottom: 6px; text-align: left; font-weight: 500; }
+.check i { flex: none; width: 14px; height: 14px; margin-right: 12px; border: 1.5px solid var(--text-faint); border-radius: 3px; }
+.check.on { border-color: var(--green-dim); }
+.check.on i { border-color: var(--green); background: var(--green); box-shadow: inset 0 0 0 3px var(--bg); }
+.check.on:focus { border-color: var(--blue); }
+.sheet-buttons { display: flex; justify-content: flex-end; margin-top: 14px; }
+.sheet-buttons > * + * { margin-left: 10px; }
+
 /* ---------- Login ---------- */
 .banner.login { display: flex; align-items: center; }
 .qr { flex: none; width: 164px; height: 164px; image-rendering: pixelated; border-radius: 4px; }

@@ -9,7 +9,11 @@ installs and updates the official Tailscale build, signs the TV in to your tailn
 brings it up and down, picks an exit node, and shows the devices on your tailnet and what Tailscale
 is doing.
 
-Built and tested on an LG OLED55BX6LB (webOS 5.4.3, 32-bit ARM) with Homebrew Channel 0.7.3.
+Built on an LG OLED55BX6LB (webOS 5.4.3, 32-bit ARM) with Homebrew Channel 0.7.3. Looking for testers!
+If you try it on another TV, send a report from the app's **Compatibility** box: it's anonymous, and
+the results go in [COMPATIBILITY.md](COMPATIBILITY.md). A report holds the TV's model, webOS and
+firmware versions, the app version and your yes or no answers, and is sent only when you press
+**Send**, through [webos-compat](https://github.com/haywirephoenix/webos-compat).
 
 ## Requirements
 
