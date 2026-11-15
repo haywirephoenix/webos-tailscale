@@ -1,13 +1,14 @@
 #!/bin/sh
 # Root side of the Tailscale app. The app runs it through the Homebrew Channel's exec:
 #   sh ctl.sh status | status-text | up | down | exit-node [NAME]
-#             login | login-log | logout | boot on|off | latest | update | update-log | info
+#             login | login-log | logout | server [URL] | boot on|off | latest | update | update-log | info
 # Each command prints one JSON object on stdout.
 #
 # Layout on the TV:
 #   /home/root/sbin/tailscale_<version>_arm/   official static builds
 #   /home/root/sbin/tailscale-current          symlink to the build in use
 #   /home/root/tailscaled.state                the pairing
+#   /home/root/tailscale-login-server          the control server to log in to, if not Tailscale's
 
 SBIN=/home/root/sbin
 CUR=$SBIN/tailscale-current
@@ -15,6 +16,7 @@ STATE=/home/root/tailscaled.state
 LOG=/tmp/tailscalectl-update.log
 LOCK=/tmp/tailscalectl-update.lock
 LOGIN_LOG=/tmp/tailscalectl-login.log
+SERVER=/home/root/tailscale-login-server     # empty or missing: Tailscale's own
 BOOT=/var/lib/webosbrew/init.d/70-tailscale   # the Homebrew Channel runs init.d at boot
 PKGS=https://pkgs.tailscale.com/stable
 SELF=$(cd "$(dirname "$0")" && pwd)/ctl.sh
@@ -92,8 +94,30 @@ cmd_status() {
   inst=false; [ -x "$CUR/tailscaled" ] && inst=true
   login=false; [ -n "$(login_pid)" ] && login=true
   boot=false; [ -x "$BOOT" ] && boot=true
-  printf '{"installed":%s,"running":%s,"pid":"%s","version":"%s","dir":"%s","updating":%s,"loggingIn":%s,"boot":%s,"status":%s}\n' \
-    "$inst" "$([ -n "$pid" ] && echo true || echo false)" "$pid" "$(json_str "$ver")" "$(json_str "$dir")" "$upd" "$login" "$boot" "$st"
+  printf '{"installed":%s,"running":%s,"pid":"%s","version":"%s","dir":"%s","updating":%s,"loggingIn":%s,"boot":%s,"server":"%s","status":%s}\n' \
+    "$inst" "$([ -n "$pid" ] && echo true || echo false)" "$pid" "$(json_str "$ver")" "$(json_str "$dir")" "$upd" "$login" "$boot" \
+    "$(json_str "$(login_server)")" "$st"
+}
+
+# The control server saved for the next login (Headscale, say), or nothing for Tailscale's own.
+login_server() { head -n 1 "$SERVER" 2>/dev/null; }
+
+# Save the control server the next login uses; with no URL, go back to Tailscale's own. It only
+# matters at login: a signed-in TV keeps the server it signed in with until it logs out and in again.
+cmd_server() {
+  case "$1" in
+    "")
+      rm -f "$SERVER"
+      if [ -e "$SERVER" ]; then result 1 "login server" "Could not remove $SERVER."
+      else result 0 "login server" "The next login uses Tailscale's own server."; fi ;;
+    http://?*|https://?*)
+      case "$1" in *[!A-Za-z0-9._~:/?=%@-]*)
+        result 1 "login server $1" "Not a URL: $1"; return ;;
+      esac
+      if printf '%s\n' "${1%/}" >"$SERVER"; then result 0 "login server ${1%/}" "The next login uses ${1%/}."
+      else result 1 "login server $1" "Could not write $SERVER."; fi ;;
+    *) result 1 "login server $1" "The server must start with https:// (or http://)." ;;
+  esac
 }
 
 # Start at boot. The script stands on its own, so it keeps working after an update (it uses
@@ -143,11 +167,23 @@ $("$CUR/tailscale" status 2>&1)"
   result 0 "tailscale version && tailscale status" "$out"
 }
 
-# This TV's kernel has no ip_tables module and /etc is read-only, so tailscaled can neither add
-# firewall rules nor take over DNS; both only end in health warnings. These print the flags that
-# turn them off, for TVs like this one.
+# Whether tailscaled can add its firewall rules here. Some TVs have no ip_tables module; others have
+# iptables but built without the MARK extension (unknown option "--set-mark"). So try the kind of
+# rule it adds, in a chain of our own that is removed again.
+netfilter_ok() {
+  iptables -t nat -L -n >/dev/null 2>&1 || return 1
+  iptables -t filter -F tsctl-probe >/dev/null 2>&1; iptables -t filter -X tsctl-probe >/dev/null 2>&1
+  iptables -t filter -N tsctl-probe >/dev/null 2>&1 || return 1
+  iptables -t filter -A tsctl-probe -m mark --mark 0x40000/0xff0000 -j MARK --set-mark 0x40000/0xff0000 >/dev/null 2>&1
+  ok=$?
+  iptables -t filter -F tsctl-probe >/dev/null 2>&1; iptables -t filter -X tsctl-probe >/dev/null 2>&1
+  return $ok
+}
+
+# Where tailscaled can neither add firewall rules nor take over DNS (/etc is read-only on these
+# TVs), both only end in health warnings. These print the flags that turn them off.
 needed_flags() {
-  iptables -t filter -L -n >/dev/null 2>&1 || printf ' --netfilter-mode=off'
+  netfilter_ok || printf ' --netfilter-mode=off'
   if ( : >/etc/.tailscalectl-probe ) 2>/dev/null; then rm -f /etc/.tailscalectl-probe; else printf ' --accept-dns=false'; fi
 }
 
@@ -158,7 +194,7 @@ fix_prefs() {
   flags=$(needed_flags)
   case "$flags" in *netfilter*)
     printf '%s' "$prefs" | grep -q '"NetfilterMode": 0' ||
-      { "$CUR/tailscale" set --netfilter-mode=off >/dev/null 2>&1 && echo "Turned off netfilter mode (no iptables on this TV)."; } ;;
+      { "$CUR/tailscale" set --netfilter-mode=off >/dev/null 2>&1 && echo "Turned off netfilter mode (this TV's iptables cannot add Tailscale's firewall rules)."; } ;;
   esac
   case "$flags" in *accept-dns*)
     printf '%s' "$prefs" | grep -q '"CorpDNS": true' &&
@@ -198,8 +234,14 @@ cmd_login() {
   start_daemon || { result 1 "tailscaled --state=$STATE" "tailscaled did not start"; return; }
   [ -n "$(login_pid)" ] && { result 0 "tailscale up --qr" "Already waiting for a login."; return; }
   flags=$(needed_flags)
+  srv=$(login_server)
   : >"$LOGIN_LOG"
-  setsid timeout $(tmo_flag) 900 "$CUR/tailscale" up --qr --reset $flags </dev/null >>"$LOGIN_LOG" 2>&1 &
+  if [ -n "$srv" ]; then
+    setsid timeout $(tmo_flag) 900 "$CUR/tailscale" up --qr --reset $flags --login-server="$srv" </dev/null >>"$LOGIN_LOG" 2>&1 &
+    flags="$flags --login-server=$srv"
+  else
+    setsid timeout $(tmo_flag) 900 "$CUR/tailscale" up --qr --reset $flags </dev/null >>"$LOGIN_LOG" 2>&1 &
+  fi
   result 0 "tailscale up --qr --reset$flags" "Waiting for the login URL..."
 }
 
@@ -313,11 +355,12 @@ case "$1" in
   login) cmd_login ;;
   login-log) cmd_login_log ;;
   logout) cmd_logout ;;
+  server) cmd_server "$2" ;;
   boot) cmd_boot "$2" ;;
   latest) cmd_latest ;;
   update) cmd_update ;;
   do-update) do_update ;;
   update-log) cmd_update_log ;;
   info) cmd_info ;;
-  *) echo '{"error":"usage: ctl.sh status|status-text|up|down|exit-node [NAME]|login|login-log|logout|boot on|off|latest|update|update-log"}' ;;
+  *) echo '{"error":"usage: ctl.sh status|status-text|up|down|exit-node [NAME]|login|login-log|logout|server [URL]|boot on|off|latest|update|update-log"}' ;;
 esac

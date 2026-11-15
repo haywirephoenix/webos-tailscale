@@ -1,7 +1,7 @@
 // Demo mode: stands in for ctl.sh when the page is opened on a PC (no PalmServiceBridge), or with ?demo.
 // Open index.html in a browser. Pick a starting state with
 // ?state=stopped|running|many|exit|login|fresh|nodaemon|warn|updating   (many: 18 devices; fresh: not installed)
-// Add &boot=on to start with Start at boot turned on.
+// Add &boot=on to start with Start at boot turned on, &server=https://... to start with a login server.
 // Made-up data only.
 (function () {
   'use strict';
@@ -35,7 +35,7 @@
   var version = '1.98.9';
   var state = {
     installed: true, running: true, backend: 'Stopped', exit: '', updating: false, log: [], authURL: '', health: [],
-    loggingIn: false, loginLog: '', boot: params.boot === 'on'
+    loggingIn: false, loginLog: '', boot: params.boot === 'on', server: params.server || ''
   };
   var s = params.state || 'stopped';
   if (s === 'running' || s === 'exit' || s === 'warn' || s === 'many') state.backend = 'Running';
@@ -112,7 +112,7 @@
     if (op === 'status') {
       return { installed: state.installed, running: state.running, pid: state.running ? '4242' : '', version: version,
         dir: state.installed ? 'tailscale_' + version + '_arm' : '', updating: state.updating, loggingIn: state.loggingIn,
-        boot: state.boot, status: status() };
+        boot: state.boot, server: state.server, status: status() };
     }
     if (op === 'status-text') {
       if (!state.installed) return { ok: false, cmd: 'tailscale status', output: 'Tailscale is not installed. Use Install.' };
@@ -140,20 +140,26 @@
     if (op === 'login') {
       state.running = true; state.loggingIn = true; state.loginLog = '';
       setTimeout(function () {
-        state.authURL = 'https://login.tailscale.com/a/1a2b3c4d5e6f7a';
+        state.authURL = state.server ? state.server + '/register/1a2b3c4d5e6f7a' : 'https://login.tailscale.com/a/1a2b3c4d5e6f7a';
         state.loginLog = '\nTo authenticate, visit:\n\n\t' + state.authURL + '\n\n' + fakeQR() + '\n';
       }, 1500);
       setTimeout(function () {   // someone approves it on their phone
         state.loggingIn = false; state.authURL = ''; state.backend = 'Running';
         state.loginLog += '\nSuccess.\n';
       }, 14000);
-      return { ok: true, cmd: 'tailscale up --qr --reset --netfilter-mode=off --accept-dns=false', output: 'Waiting for the login URL...' };
+      return { ok: true, cmd: 'tailscale up --qr --reset --netfilter-mode=off --accept-dns=false' +
+        (state.server ? ' --login-server=' + state.server : ''), output: 'Waiting for the login URL...' };
     }
     if (op === 'login-log') return { waiting: state.loggingIn, log: state.loginLog };
     if (op === 'boot') {
       state.boot = a[1] === 'on';
       return { ok: true, cmd: 'boot ' + a[1],
         output: state.boot ? 'Tailscale starts at boot (/var/lib/webosbrew/init.d/70-tailscale).' : 'Tailscale no longer starts at boot.' };
+    }
+    if (op === 'server') {
+      state.server = (a[1] || '').replace(/'/g, '').replace(/\/$/, '');
+      return { ok: true, cmd: 'login server' + (state.server ? ' ' + state.server : ''),
+        output: state.server ? 'The next login uses ' + state.server + '.' : 'The next login uses Tailscale\'s own server.' };
     }
     if (op === 'logout') { state.backend = 'NeedsLogin'; return { ok: true, cmd: 'tailscale logout', output: '' }; }
     if (op === 'latest') return { latest: '1.104.5', current: version };

@@ -18,10 +18,8 @@
        <div class="controls" id="controls">
           <button class="ctl primary" id="toggle" disabled>&hellip;</button>
           <button class="ctl" id="exit" disabled>Exit node: none</button>
-          <button class="ctl" id="update">Check for update</button>
           <button class="ctl" id="refresh">Refresh</button>
-          <button class="ctl" id="boot" disabled>Boot: off</button>
-          <button class="ctl" id="logout" disabled>Log out</button>
+          <button class="ctl" id="settings" disabled>Settings</button>
           <span class="demo-tag" id="demoTag" hidden>demo</span>
         </div>
         
@@ -58,6 +56,42 @@
       <div class="sheet-buttons">
         <button class="ctl" id="cancelReport">Cancel</button>
         <button class="ctl primary" id="send" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+  <div id="settingsDialog" class="dialog" role="dialog" aria-labelledby="settingsTitle">
+    <div class="sheet">
+      <div class="section-label" id="settingsTitle">Settings</div>
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Start at boot</div>
+          <div class="setting-hint">Start Tailscale and connect when the TV turns on.</div>
+        </div>
+        <button class="ctl" id="boot">Off</button>
+      </div>
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Login server</div>
+          <div class="setting-hint">Leave empty for Tailscale's own; enter yours for a self-hosted one such as Headscale.</div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <input type="url" class="field" id="serverInput" placeholder="https://controlplane.tailscale.com"
+          autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="ctl" id="serverSave">Save</button>
+      </div>
+      <p class="note" id="serverNote"></p>
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Tailscale <span id="setVersion"></span></div>
+          <div class="setting-hint">Official ARM build from pkgs.tailscale.com.</div>
+        </div>
+        <button class="ctl" id="update">Check for update</button>
+      </div>
+      <div class="sheet-buttons">
+        <button class="ctl" id="logout">Log out</button>
+        <span class="spacer"></span>
+        <button class="ctl primary" id="settingsClose">Close</button>
       </div>
     </div>
   </div>
