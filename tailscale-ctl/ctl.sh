@@ -19,6 +19,51 @@ BOOT=/var/lib/webosbrew/init.d/70-tailscale   # the Homebrew Channel runs init.d
 PKGS=https://pkgs.tailscale.com/stable
 SELF=$(cd "$(dirname "$0")" && pwd)/ctl.sh
 
+# Kernels without policy routing ("ip rule" fails, as on some TVs). tailscaled keeps its own traffic
+# out of the tunnel with a socket mark and an ip rule. Without policy routing the mark does nothing,
+# and an exit node's default route replaces the TV's own in the main table, so tailscaled's packets
+# loop into the tunnel and nothing gets out. So there tailscaled binds its sockets to the network
+# interface instead (TS_FORCE_LINUX_BIND_TO_DEVICE), and keep_routes adds two routes: a second
+# default route through the router, with a high metric, which tailscaled's replace leaves alone and
+# its bound sockets use; and the local network, which would otherwise go through the exit node too.
+# The boot script gets a copy of these, so keep them standing on their own.
+ROUTES_FN=$(cat <<'EOF'
+TSCTL_METRIC=4242
+TSCTL_GW=/tmp/tailscalectl-gw
+no_policy_routing() { ! ip rule >/dev/null 2>&1; }
+bind_env() { no_policy_routing && export TS_FORCE_LINUX_BIND_TO_DEVICE=true; return 0; }
+keep_routes() {
+  no_policy_routing || return 0
+  set -- $(ip -4 route show default 2>/dev/null | grep -v 'dev tailscale' |
+    sed -n 's/^default via \([0-9.]*\) dev \([^ ]*\).*/\1 \2/p' | head -n 1)
+  if [ -n "$2" ]; then echo "$1 $2" >"$TSCTL_GW"; else set -- $(cat "$TSCTL_GW" 2>/dev/null); fi
+  [ -n "$2" ] || return 0
+  ip -4 route show default | grep -q "via $1 dev $2 .*metric $TSCTL_METRIC" ||
+    ip route add default via "$1" dev "$2" metric $TSCTL_METRIC 2>/dev/null
+  lan=$(ip -4 -o addr show dev "$2" 2>/dev/null | sed -n 's/.* inet \([0-9.]*\/[0-9]*\).*/\1/p' | head -n 1 |
+    awk -F'[./]' '$5 >= 8 && $5 < 32 { s = 2 ^ (32 - $5); v = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / s) * s
+      printf "%d.%d.%d.%d/%d", int(v / 16777216), int(v / 65536) % 256, int(v / 256) % 256, v % 256, $5 }')
+  [ -n "$lan" ] || return 0
+  ip -4 route show "$lan" 2>/dev/null | grep -q . || ip route add "$lan" dev "$2" metric $TSCTL_METRIC 2>/dev/null
+  return 0
+}
+EOF
+)
+eval "$ROUTES_FN"
+
+# Whether the running tailscaled has the setting it needs here (it is read once, at start).
+daemon_env_ok() {
+  no_policy_routing || return 0
+  p=$(daemon_pid)
+  [ -z "$p" ] || tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -q '^TS_FORCE_LINUX_BIND_TO_DEVICE='
+}
+# Restart tailscaled if it is running without it; prints a line for the console when it does.
+fix_daemon_env() {
+  daemon_env_ok && return 0
+  echo "Restarted tailscaled so its own traffic stays off the tunnel (this TV has no policy routing)."
+  stop_daemon; start_daemon
+}
+
 # A JSON string body, with newlines kept as \n so the console shows output as tailscale printed it.
 json_str() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\t\r' '  ' | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }'
@@ -50,7 +95,8 @@ version_of() { "$1/tailscale" version 2>/dev/null | head -n 1; }
 
 start_daemon() {
   [ -n "$(daemon_pid)" ] && return 0
-  setsid "$CUR/tailscaled" --state="$STATE" </dev/null >/dev/null 2>&1 &
+  keep_routes
+  ( bind_env; exec setsid "$CUR/tailscaled" --state="$STATE" ) </dev/null >/dev/null 2>&1 &
   i=0
   while [ $i -lt 15 ]; do
     sleep 1
@@ -84,6 +130,8 @@ cmd_status() {
   ver=$(version_of "$CUR")
   dir=$(basename "$(readlink "$CUR" 2>/dev/null)")
   st=null
+  [ -n "$pid" ] && keep_routes
+  [ -x "$BOOT" ] && ! grep -q 'keep_routes' "$BOOT" && write_boot
   if [ -n "$pid" ]; then
     out=$("$CUR/tailscale" status --json 2>/dev/null)
     case "$out" in \{*) st=$out ;; esac
@@ -99,20 +147,26 @@ cmd_status() {
 # Start at boot. The script stands on its own, so it keeps working after an update (it uses
 # tailscale-current) and even if the app is removed; turning it off deletes it. At boot it starts
 # tailscaled unless one is running, then brings Tailscale up.
-cmd_boot() {
-  case "$1" in
-    on)
-      mkdir -p "$(dirname "$BOOT")"
-      cat >"$BOOT" <<'EOF'
+write_boot() {
+  mkdir -p "$(dirname "$BOOT")"
+  {
+    cat <<'EOF'
 #!/bin/sh
 # Starts Tailscale at boot. Written by the Tailscale app (com.homebrew.tailscalectl): turn it off
 # there, or delete this file. The Homebrew Channel runs it from /var/lib/webosbrew/init.d.
 TS=/home/root/sbin/tailscale-current
+EOF
+    printf '%s\n' "$ROUTES_FN"
+    cat <<'EOF'
 (
   sleep 10
   [ -x "$TS/tailscaled" ] || exit 0
+  # Wait for the network, so the routes this TV may need can be kept.
+  i=0
+  while [ $i -lt 60 ] && ! ip -4 route show default | grep -q ' via '; do sleep 1; i=$((i + 1)); done
+  keep_routes
   if [ -z "$(pidof tailscaled)" ]; then
-    setsid "$TS/tailscaled" --state=/home/root/tailscaled.state </dev/null >/dev/null 2>&1 &
+    ( bind_env; exec setsid "$TS/tailscaled" --state=/home/root/tailscaled.state ) </dev/null >/dev/null 2>&1 &
   fi
   i=0
   while [ $i -lt 30 ]; do
@@ -121,10 +175,18 @@ TS=/home/root/sbin/tailscale-current
   done
   # A bare "up": the settings this TV needs are already saved in the state file.
   if timeout -t 1 true 2>/dev/null; then timeout -t 60 "$TS/tailscale" up; else timeout 60 "$TS/tailscale" up; fi
+  keep_routes
 ) </dev/null >/dev/null 2>&1 &
 exit 0
 EOF
-      chmod 755 "$BOOT"
+  } >"$BOOT"
+  chmod 755 "$BOOT"
+}
+
+cmd_boot() {
+  case "$1" in
+    on)
+      write_boot
       if [ -x "$BOOT" ] && sh -n "$BOOT"; then result 0 "boot on" "Tailscale starts at boot ($BOOT)."
       else result 1 "boot on" "Could not write $BOOT."; fi ;;
     off)
@@ -169,7 +231,8 @@ fix_prefs() {
 cmd_up() {
   ensure_link || { result 1 "tailscale up" "Tailscale is not installed. Use Install."; return; }
   start_daemon || { result 1 "tailscaled --state=$STATE" "tailscaled did not start"; return; }
-  fixed=$(fix_prefs)
+  fixed=$(fix_daemon_env; fix_prefs)
+  keep_routes
   # A bare "up": with any flag, tailscale up insists on repeating every non-default setting.
   out=$(timeout $(tmo_flag) 30 "$CUR/tailscale" up 2>&1); rc=$?
   [ -n "$fixed" ] && out="$fixed
@@ -183,10 +246,20 @@ cmd_down() {
   result $rc "tailscale down" "$out"
 }
 
+# With an exit node, the TV keeps its local network (casting, the router, SSH from a PC).
 cmd_exit_node() {
   if [ -z "$(daemon_pid)" ]; then result 1 "tailscale set --exit-node=$1" "tailscaled is not running"; return; fi
-  out=$("$CUR/tailscale" set --exit-node="$1" 2>&1); rc=$?
-  result $rc "tailscale set --exit-node=$1" "$out"
+  note=""
+  if [ -n "$1" ]; then
+    keep_routes
+    note=$(fix_daemon_env)
+    set -- "$1" --exit-node-allow-lan-access=true
+  fi
+  out=$("$CUR/tailscale" set --exit-node="$1" $2 2>&1); rc=$?
+  keep_routes
+  [ -n "$note" ] && out="$note${out:+
+$out}"
+  result $rc "tailscale set --exit-node=$1${2:+ $2}" "$out"
 }
 
 # Sign the TV in, the first time or once its key has expired. "tailscale up --qr" prints a login
