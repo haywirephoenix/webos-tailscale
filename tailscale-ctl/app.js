@@ -7,10 +7,15 @@
   var POLL_MS = 5000;
 
   function $(id) { return document.getElementById(id); }
-  var toggle = $('toggle'), exitBtn = $('exit'), updateBtn = $('update'), refreshBtn = $('refresh'), logoutBtn = $('logout');
-  var bootBtn = $('boot');
+  var toggle = $('toggle'), exitBtn = $('exit'), refreshBtn = $('refresh'), settingsBtn = $('settings');
   var reportBtn = $('report');
-  var buttons = [toggle, exitBtn, updateBtn, refreshBtn, bootBtn, logoutBtn, reportBtn];
+  var buttons = [toggle, exitBtn, refreshBtn, settingsBtn, reportBtn];
+  // In the Settings dialog
+  var settingsDialog = $('settingsDialog'), bootBtn = $('boot'), serverInput = $('serverInput'), serverSave = $('serverSave');
+  var serverNote = $('serverNote'), updateBtn = $('update'), logoutBtn = $('logout'), settingsClose = $('settingsClose');
+  var settingsItems = [bootBtn, serverInput, serverSave, updateBtn, logoutBtn, settingsClose];
+  var settingsOpen = false;
+  var settingsFocus = null;  // what was pressed last in Settings, to go back to once it is enabled again
   var armed = null;       // timer while Log out waits for its second press
   var logEl = $('log');
   var scroller = $('scroller');
@@ -104,6 +109,7 @@
   function versionShort(v) { return String(v || '').split('-')[0]; }
   function needsLogin() { var b = backend(); return b === 'NeedsLogin' || b === 'NoState'; }
   function exitPeerOf(st) { return peersOf(st).filter(function (p) { return p.ExitNode; })[0]; }
+  function hostOf(url) { return String(url || '').replace(/^\w+:\/\//, '').replace(/\/.*$/, ''); }
 
   // ---------- what changed since the last poll, for the console ----------
   function logChanges(a, b) {
@@ -116,6 +122,7 @@
     var out = [];
     if (a.installed !== b.installed) out.push(b.installed ? 'tailscale installed' : 'tailscale build missing');
     if (!!a.boot !== !!b.boot) out.push(b.boot ? 'start at boot on' : 'start at boot off');
+    if ((a.server || '') !== (b.server || '')) out.push('login server ' + (b.server || 'Tailscale (default)'));
     if (a.running !== b.running) out.push(b.running ? 'tailscaled started (pid ' + b.pid + ')' : 'tailscaled stopped');
     else if (a.pid && b.pid && a.pid !== b.pid) out.push('tailscaled restarted (pid ' + b.pid + ')');
     if (versionShort(a.version) !== versionShort(b.version) && b.version) out.push('version ' + versionShort(a.version) + ' → ' + versionShort(b.version));
@@ -159,6 +166,8 @@
     $('meta').innerHTML = info
       ? '<span><b>' + peers.length + '</b> peers · <b>' + online + '</b> online</span>' +
         '<span>client <b>' + esc(versionShort(info.version) || '—') + '</b></span>' +
+        (info.server ? '<span>server <b>' + esc(hostOf(info.server)) + '</b></span>' : '') +
+        (info.boot ? '<span>boot <b>on</b></span>' : '') +
         '<span>daemon <b>' + (info.running ? 'pid ' + esc(info.pid) : 'stopped') + '</b></span>' +
         (st ? '<span>tun <b>' + (st.TUN ? 'on' : 'off') + '</b></span>' : '')
       : 'reading status';
@@ -177,14 +186,20 @@
     exitBtn.textContent = 'Exit node: ' + (exitPeer ? exitPeer.HostName : 'none');
     exitBtn.disabled = busy || !up;
 
+    refreshBtn.disabled = false;
+
+    // Settings: amber while an update is waiting.
     var newer = latest && latest !== versionShort(info && info.version);
+    settingsBtn.disabled = !info;
+    settingsBtn.className = 'ctl' + (newer && info && info.installed ? ' attention' : '');
+    $('setVersion').textContent = info && info.installed ? versionShort(info.version) : '(not installed)';
+
     if (updating) updateBtn.textContent = 'Updating…';
     else if (newer && info && info.installed) updateBtn.textContent = 'Update to ' + latest;
     else if (latest && info && info.installed) updateBtn.textContent = 'Up to date';
     else updateBtn.textContent = 'Check for update';
     updateBtn.className = 'ctl' + (newer && info && info.installed ? ' attention' : '');
     updateBtn.disabled = busy || updating || (info && !info.installed);
-    refreshBtn.disabled = false;
 
     // Signed in (up or down) is when logging out means anything.
     var signedIn = info && info.running && (b === 'Running' || b === 'Stopped' || b === 'Starting' || b === 'NeedsMachineAuth');
@@ -194,9 +209,12 @@
 
     // Start at boot: shows whether it's on; a press turns it the other way.
     var boot = !!(info && info.boot);
-    bootBtn.textContent = 'Boot: ' + (boot ? 'on' : 'off');
+    bootBtn.textContent = boot ? 'On' : 'Off';
     bootBtn.className = 'ctl' + (boot ? ' on' : '');
     bootBtn.disabled = busy || !info || !info.installed;
+
+    // Login server: can't change while a login is waiting on the old one.
+    serverInput.disabled = serverSave.disabled = busy || !info || !!info.loggingIn;
 
     // banners
     var html = '';
@@ -215,7 +233,8 @@
           : 'Asking Tailscale for a login link…') + '</pre></div></div>';
     } else if (b === 'NeedsMachineAuth') {
       html += '<div class="banner"><div class="h-title">waiting for approval</div><pre>This TV is signed in but your tailnet ' +
-        'needs an admin to approve new devices. Approve it at login.tailscale.com/admin/machines.</pre></div>';
+        'needs an admin to approve new devices. Approve it ' +
+        (info.server ? 'on ' + esc(hostOf(info.server)) : 'at login.tailscale.com/admin/machines') + '.</pre></div>';
     }
     // While down, tailscaled keeps the last warnings it had (a relay it could not reach, say), and
     // "Tailscale is stopped." is just the state the pill already shows; only show warnings while up.
@@ -231,7 +250,10 @@
 
     // A button that was focused may have been disabled while busy; give the remote somewhere to start.
     var f = document.activeElement;
-    if (!busy && (!f || f === document.body || f.disabled)) { var g = focusable()[0]; if (g) g.focus(); }
+    if (!busy && (!f || f === document.body || f.disabled)) {
+      var g = settingsOpen ? (settingsFocus && !settingsFocus.disabled ? settingsFocus : settingsFocusable()[0]) : focusable()[0];
+      if (g) g.focus();
+    }
   }
 
   // This TV goes first, as a card like the others.
@@ -308,7 +330,8 @@
   function watchLogin() {
     ctl('login-log', function (a) {
       if (a) {
-        var url = (String(a.log).match(/https:\/\/login\.tailscale\.com\/\S+/) || [])[0];
+        // The first link it prints: login.tailscale.com, or the custom login server.
+        var url = (String(a.log).match(/https?:\/\/\S+/) || [])[0];
         if (url && a.waiting && (!login || login.url !== url)) {
           login = { url: url, qr: parseQR(a.log) };
           if (url !== loggedURL) { log('Login link: ' + url); loggedURL = url; }
@@ -318,7 +341,7 @@
       if (a && a.log) {
         // What "tailscale up --qr" said last ("Success.", or why it gave up), without the link and code again.
         var tail = String(a.log).split('\n').filter(function (l) {
-          return /\w/.test(l) && !/^\W+$/.test(l) && !/To authenticate|login\.tailscale\.com/.test(l);
+          return /\w/.test(l) && !/^\W+$/.test(l) && !/To authenticate|https?:\/\//.test(l);
         }).slice(-2).join('\n');
         if (tail) log('tailscale up: ' + tail);
       }
@@ -404,6 +427,7 @@
 
   var shown = 0;   // update-log lines already in the console
   function startUpdate(msg) {
+    closeSettings();   // its progress shows in the console
     busy = true; render();
     log(msg);
     ctl('update', function (a) {
@@ -433,7 +457,57 @@
   });
   window.Compat.init(ctl);
 
+  // ---------- settings ----------
+  // Things set once or seldom: start at boot, the login server, updates and logging out.
+  function settingsFocusable() { return settingsItems.filter(function (b) { return !b.disabled; }); }
+  function openSettings() {
+    settingsOpen = true;
+    serverInput.value = (info && info.server) || '';
+    serverHint();
+    settingsDialog.style.display = 'flex';
+    render();
+    var first = settingsFocusable()[0];
+    if (first) first.focus();
+  }
+  function closeSettings() {
+    if (!settingsOpen) return;
+    settingsOpen = false;
+    settingsFocus = null;
+    if (armed) { clearTimeout(armed); armed = null; }
+    settingsDialog.style.display = 'none';
+    render();
+    (settingsBtn.disabled ? toggle : settingsBtn).focus();
+  }
+  settingsBtn.addEventListener('click', openSettings);
+  settingsClose.addEventListener('click', closeSettings);
+  settingsItems.forEach(function (b) { b.addEventListener('focus', function () { settingsFocus = b; }); });
+
   bootBtn.addEventListener('click', function () { run(info && info.boot ? 'boot off' : 'boot on'); });
+
+  // The login server is saved by ctl.sh and used by the next Log in (tailscale up --login-server).
+  // A TV that is signed in stays on its server until it logs out and in again.
+  function serverSay(text, cls) { serverNote.textContent = text; serverNote.className = 'note' + (cls ? ' ' + cls : ''); }
+  function signedInNow() { var b = backend(); return info && info.running && b && b !== 'NeedsLogin' && b !== 'NoState'; }
+  function serverHint() {
+    serverSay(signedInNow() ? 'This TV is signed in: a new server takes effect after Log out and Log in.' : '');
+  }
+  function saveServer() {
+    var url = String(serverInput.value).replace(/^\s+|\s+$/g, '').replace(/\/+$/, '');
+    if (url && !/^https?:\/\/[A-Za-z0-9._~:\/?=%@-]+$/.test(url)) {
+      serverSay('Enter a URL such as https://headscale.example.com, or leave it empty.', 'error');
+      serverInput.focus();
+      return;
+    }
+    if (url === ((info && info.server) || '')) { serverSay('No change.'); return; }
+    serverSave.focus();
+    run(url ? "server '" + url + "'" : 'server', function () {
+      serverInput.value = (info && info.server) || '';
+      serverSay(info && info.server === url
+        ? 'Saved. ' + (signedInNow() ? 'Log out and Log in to use it.' : 'Log in uses ' + (url || 'Tailscale\'s own server') + '.')
+        : 'Could not save it; see the console.', info && info.server === url ? 'go' : 'error');
+    });
+  }
+  serverSave.addEventListener('click', saveServer);
 
   // Logging out signs the TV out of the tailnet; getting back needs Log in and a phone, so it
   // takes a second press within five seconds.
@@ -445,6 +519,7 @@
       return;
     }
     clearTimeout(armed); armed = null;
+    closeSettings();
     // Start the console afresh: the old one holds the last login link and this tailnet's devices.
     login = null; loggedURL = null;
     lines = []; logEl.textContent = '';
@@ -462,6 +537,21 @@
       if (k >= 37 && k <= 40 && form.length) {
         var step = k === 39 || k === 40 ? 1 : -1;
         form[at < 0 ? 0 : Math.max(0, Math.min(form.length - 1, at + step))].focus();
+        e.preventDefault();
+      }
+      return;
+    }
+    // Settings: Back closes it, Enter in the server field saves, and the arrows step through its
+    // controls in order. In the field, Left and Right move the caret instead.
+    if (settingsOpen) {
+      if (k === 461 || k === 27) { closeSettings(); e.preventDefault(); return; }
+      var items = settingsFocusable(), pos = items.indexOf(document.activeElement);
+      var inField = document.activeElement === serverInput;
+      if (k === 13 && inField) { saveServer(); e.preventDefault(); return; }
+      if (k === 38 || k === 40 || ((k === 37 || k === 39) && !inField)) {
+        if (!items.length) return;
+        var step = k === 39 || k === 40 ? 1 : -1;
+        items[pos < 0 ? 0 : Math.max(0, Math.min(items.length - 1, pos + step))].focus();
         e.preventDefault();
       }
       return;
